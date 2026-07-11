@@ -15,6 +15,7 @@ https://oegit.github.io/oe-docs/email-development-agent-guide.html
 | `RESPONSIVE_RULES.md` | Mobile behavior: breakpoints, fluid images, stacking rules |
 | `FIGMA_TO_EMAIL_WORKFLOW.md` | The 10-step process from design file to production HTML |
 | `PRE_SEND_QA.md` | The consolidated checklist that gates every real send |
+| `validate-email.js` | Automated pre-send QA gate — checks the compiled HTML against the hard rules and writes `VALIDATION_REPORT.md`. Zero dependencies |
 | `projects/` | Your email projects live here — the agent scaffolds them from your brief |
 
 ## Quick version
@@ -22,6 +23,16 @@ https://oegit.github.io/oe-docs/email-development-agent-guide.html
 1. Download this repo (**Code → Download ZIP**) and unzip it anywhere on your machine.
 2. Open the **Claude Desktop App** → **Code** tab → open this folder.
 3. Follow the [Quickstart](https://oegit.github.io/oe-docs/email-development-agent-guide.html#quickstart) in the guide — it walks you from starting the agent to the final deliverable.
+
+## Automated QA
+
+Before any real send, run the automated gate against your compiled HTML (from the folder root or your project folder):
+
+```bash
+node validate-email.js dist/email.html
+```
+
+It checks the mechanically-verifiable rules (Gmail 102KB clip, image attributes, font stacks, dark-mode contract, VML namespaces, WCAG link names, and more), writes `VALIDATION_REPORT.md`, and exits non-zero on any blocking failure. The remaining manual checks live in `PRE_SEND_QA.md`. Run `node validate-email.js --help` for options (multiple files, MJML token contract).
 
 ## What you need
 
