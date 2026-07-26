@@ -21,19 +21,29 @@ font-family: 'Your Web Font', Arial, Helvetica, sans-serif;
 
 ---
 
-## RULE 2 — Google Fonts: Outlook ignores them completely
+## RULE 2 — Google Fonts: load via `<link>`, never `@import` or `<mj-font>`
 
-**Problem:** The `@import url('https://fonts.googleapis.com/...')` in `<head>` is fully ignored by Outlook. The web font never loads.
+**Problem:** Outlook for Windows ignores web fonts entirely — the Outlook experience always renders in the Arial fallback, whatever loading method you use. So the method is chosen for the *other* clients (Apple Mail is the one that actually loads it), and there the loader must survive ESP sanitizers.
 
-**Fix:** Always include a robust fallback. The Outlook experience will always use Arial. Design must look acceptable in Arial too.
+**Fix:** Load the web font with a `<link rel="stylesheet">` in `<head>`, wrapped in a non-MSO conditional, and always ship a robust Arial fallback inline. Design must look acceptable in Arial too.
+
+```html
+<!-- In <head>, inside <mj-raw> — loads in Apple Mail; Gmail strips it (Arial there); Outlook ignores it (Arial) -->
+<!--[if !mso]><!-->
+<link href="https://fonts.googleapis.com/css2?family=Your+Web+Font&display=swap" rel="stylesheet" type="text/css">
+<!--<![endif]-->
+```
 
 ```css
-/* In <head> — loads in Gmail, Apple Mail, Outlook.com */
-@import url('https://fonts.googleapis.com/...');
-
-/* Inline on every element — this is what Outlook uses */
+/* Inline on every element — this is what Outlook actually uses */
 style="font-family:'Your Web Font', Arial, Helvetica, sans-serif;"
 ```
+
+**Do not use `@import`.** Several ESP CSS parsers reject it (Gmail strips it outright), and `validate-email.js` blocks on any `@import` in the compiled output (check 13).
+
+**Do not use MJML's `<mj-font>` either.** It emits a redundant CSS `@import` `<style>` block *alongside* the `<link>` — which Mailchimp's CSS parser errors on (`Cannot find a CSS file at …fonts.googleapis…`, reported from a real Mailchimp paste). Hand-write the `<link>` in an `<mj-raw>` block so only the `<link>` ships. *(This was found the hard way in the `b2b-partnerships-email` project — the template moved to `<link>`-only on 2026-07-07; the rule was written back here so the next project doesn't reach for `<mj-font>` for convenience and reintroduce the `@import`.)*
+
+> ⚠️ **Pending render verification.** The `<link>`-only method is not yet confirmed in a Litmus round *after* the 2026-07-07 swap — the last documented rounds are 2026-07-05, when `<mj-font>` still emitted both the `<link>` and the `@import`. The `<link>` was always the real loader (the `@import` was redundant), so the web font is expected to keep loading in Apple Mail (macOS/iOS) — but confirm it in the next Litmus round before treating it as verified.
 
 ---
 
@@ -350,7 +360,12 @@ Outlook's Word renderer — and several older/webmail clients — mishandle CSS 
   /* ❌ Wrong */  padding: 16px 24px;
   /* ✅ Correct */ padding-top:16px; padding-right:24px; padding-bottom:16px; padding-left:24px;
   ```
-- **`line-height` unitless only** (`line-height:1.5`) — a px line-height compounds badly with `mso-line-height-rule` (Rule 10).
+- **`line-height` unitless for flowing text** (`line-height:1.5`) — a px line-height on a paragraph compounds badly with the surrounding type scale. **Explicit px is required, not banned, on spacer and fixed-height cells**, and must always be paired with `mso-line-height-rule:exactly`:
+  ```css
+  /* ✅ flowing text */   line-height:1.5;
+  /* ✅ spacer / fixed-height cell */  height:12px; line-height:12px; mso-line-height-rule:exactly;
+  ```
+  **The carve-out is not a softening — three rules in this same file depend on it**, two of them Litmus-confirmed fixes: Rule 9's spacer (`line-height:0`), Rule 10's whole point (pairing a px line-height with `mso-line-height-rule`), and Rule 17's confirmed fix (`line-height:12px` matching an explicit `height`, explicitly *not* `0`). Written as "unitless only", this rule contradicted all three, and a QA pass run to the checklist flagged this file's own confirmed fixes as failures (audit 2026-07-26, R32). `PRE_SEND_QA.md`'s STYLES row carries the same carve-out, and `docs-contract.test.js` holds the two together.
 - **`font-weight` numeric only** (`400`/`500`/`600`/`700`) — never `bold`/`normal`; keyword weights render inconsistently across clients.
 - **Every `<img>` carries `alt`** (empty `alt=""` for decorative images) in addition to the explicit `width`/`height` + `display:block` of Rule 8 — a missing `alt` shows a broken-image label when images are blocked (Outlook/Gmail block by default).
 
@@ -359,7 +374,7 @@ Outlook's Word renderer — and several older/webmail clients — mishandle CSS 
 ## Pre-send Checklist
 
 - [ ] Every font stack has Arial before Helvetica?
-- [ ] No box-model shorthand — padding/margin per side; line-height unitless; font-weight numeric (Rule 18)?
+- [ ] No box-model shorthand — padding/margin per side; `line-height` unitless on flowing text, except explicit px matching the cell height on spacers (Rules 9/10/17); font-weight numeric (Rule 18)?
 - [ ] Every `<img>` has an `alt` attribute (empty for decorative) (Rule 18)?
 - [ ] Every block `<td>` has an inline `background-color`?
 - [ ] Buttons have VML + HTML fallback?
@@ -375,4 +390,4 @@ Outlook's Word renderer — and several older/webmail clients — mishandle CSS 
 
 ---
 
-*Last updated: 2026-07-05 · v3 · Rule 18 (CSS hygiene: no box-model shorthand, unitless line-height, numeric font-weight, img alt) absorbed from oe-email-dev.*
+*Last updated: 2026-07-25 · v4 · Rule 2 rewritten: web fonts load via `<link rel="stylesheet">` (non-MSO conditional), never `@import` (ESP-rejected, blocked by validate-email.js check 13) nor MJML's `<mj-font>` (emits a redundant `@import` Mailchimp rejects). The "why" was written back from the `b2b-partnerships-email` template's `<link>`-only fix (2026-07-07) so the next project doesn't reintroduce it — plus an explicit pending-Litmus caveat (last render round predates the swap). v3 · Rule 18 (CSS hygiene: no box-model shorthand, unitless line-height, numeric font-weight, img alt) absorbed from oe-email-dev.*

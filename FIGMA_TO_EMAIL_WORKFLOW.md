@@ -101,7 +101,7 @@ The MJML uses exact values from the design — no placeholders.
 Variable values are replaced with `{{VARIABLE_NAME}}` as defined in the project `CLAUDE.md`. Fixed values are hardcoded the same as Standard.
 
 In both cases, include in `<mj-head>`:
-- Google Fonts `@import`
+- Google Fonts via `<link rel="stylesheet">` inside an `<mj-raw>` non-MSO conditional — **not** `@import`, and **not** `<mj-font>` (see `OUTLOOK_RULES.md` Rule 2 for why)
 - Dark mode override styles (see `DARK_MODE_RULES.md`)
 - Responsive media queries (see `RESPONSIVE_RULES.md`)
 - Outlook conditional comments and VML namespace
@@ -115,6 +115,17 @@ In both cases, include in `<mj-head>`:
 # never a bare npx from outside (that fetches whatever is latest — see Prerequisites).
 npx mjml template.mjml -o output/[email-name].html
 ```
+
+**Then run the post-process — MJML cannot do this part itself:**
+
+```bash
+# Adds class="body" to <body> (merging with any existing class, idempotent).
+node ../../postprocess-email.js output/[email-name].html
+```
+
+`<body class="body">` is what makes the `u + .body` selector fire, which is how the Gmail dark-mode blend from `DARK_MODE_RULES.md` scopes itself to Gmail. MJML has no attribute for a class on `<body>`, so a bare `npx mjml` output never has it. **Skip this only if the email ships no blend at all** — `validate-email.js` check 9(a) requires the class exactly when the compiled HTML carries the `u + .body` rule or the `gmail-blend-screen` divs, and reports the check as skipped otherwise.
+
+With Variables projects don't run this by hand: `generate.js` already post-processes each row (see Step 7).
 
 For With Variables projects, compilation happens through `generate.js` (which `require('mjml')` from the local install) — see Step 7. After compiling, review the generated HTML and manually add:
 - **VML** for rounded buttons — MJML does not always generate perfect VML
@@ -167,7 +178,26 @@ This keeps the agent's knowledge current with every project.
 
 ## STEP 10 — Pre-send QA gate
 
-Before the email goes to a real send, run the full **`PRE_SEND_QA.md`** checklist — the single consolidated pre-send gate. It covers structure, styles, fonts, images, CTAs, and points to `OUTLOOK_RULES.md` / `DARK_MODE_RULES.md` / `RESPONSIVE_RULES.md` for the deep client-specific checks, plus the sign-off block. `generate.js` already auto-verifies a subset (unresolved placeholders, Gmail blend contract, leaf-`<td>` backgrounds); the rest is manual until a `validate.js` exists.
+Before the email goes to a real send, run the full **`PRE_SEND_QA.md`** checklist — the single consolidated pre-send gate. It covers structure, styles, fonts, images, CTAs, and points to `OUTLOOK_RULES.md` / `DARK_MODE_RULES.md` / `RESPONSIVE_RULES.md` for the deep client-specific checks, plus the sign-off block.
+
+The mechanical half is automated by **`validate-email.js`** (zero dependencies, plain Node):
+
+```bash
+# Standard project — against the compiled HTML:
+node validate-email.js output/[email-name].html
+
+# With Variables — enforce the placeholder contract too, over the REAL run:
+node validate-email.js output/*.html --mjml template.mjml --tokens qa-tokens.txt
+
+# ...and over the deterministic sample build, if the project has one:
+node validate-email.js dist/email.html --mjml template.mjml --tokens qa-tokens.txt
+```
+
+**Gate `output/`, not only `dist/`.** `output/` is the real run — the files that get sent. `dist/` is the deterministic sample (`build-email.js`, one fixed anonymized row) that the test suite and CI use; it shares no data with `output/`, so a green `dist/` says nothing about the emails going out. Running the gate with no file argument defaults to `dist/email.html`. On "With Variables" projects `generate.js` runs the gate per row as it writes, so the real run cannot leave ungated.
+
+It exits non-zero on any blocking failure and writes `VALIDATION_REPORT.md`. On "With Variables" projects `generate.js` also auto-verifies a subset at build time (unresolved placeholders, Gmail blend contract, leaf-`<td>` backgrounds). Everything the script lists as `[MANUAL]` — Litmus renders, legal footer, minimum sizes, final copy — stays human.
+
+**The gate runs in Claude Code, pointed at the agent folder.** A green run anywhere else is a pre-check, not the send gate.
 
 ---
 
@@ -191,4 +221,4 @@ Pick the model by the nature of the step (resilient wording — model availabili
 
 ---
 
-*Last updated: 2026-07-10 · v5 · model/effort guidance reworded to be self-contained (removed workspace-root routing reference) for portability.*
+*Last updated: 2026-07-25 · v6 · STEP 5 now specifies loading Google Fonts via `<link rel="stylesheet">` in an `<mj-raw>` non-MSO conditional — not `@import`, not `<mj-font>` (see OUTLOOK_RULES Rule 2). STEP 10 (in the same round as the validate-email.js gate docs, PR #82) points the mechanical half at `validate-email.js`. v5 · model/effort guidance reworded to be self-contained (removed workspace-root routing reference) for portability.*

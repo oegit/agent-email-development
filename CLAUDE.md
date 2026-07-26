@@ -45,7 +45,7 @@ The email is generated multiple times with different data. Requires a `template.
 1. Always declare web font + fallback in the same inline `style`
 2. **Arial before Helvetica** in the fallback stack — Arial is on every Windows machine; Helvetica is not
 3. **Never** use only `Helvetica, sans-serif` — falls back to Times New Roman in some Outlook versions
-4. Google Fonts `@import` goes in `<head>` but Outlook ignores it — the fallback is what matters in Outlook
+4. **Load a Google Font with `<link rel="stylesheet">` in `<head>`, wrapped in a non-MSO conditional — never `@import`, never `<mj-font>`.** Several ESP CSS parsers reject `@import`, Gmail strips it, and `validate-email.js` blocks the build on any `@import` in the compiled output (check 13). Outlook ignores the web font either way, so the fallback stack is what ships there — see `OUTLOOK_RULES.md` Rule 2 for the exact `<mj-raw>` snippet and why `<mj-font>` is out too.
 5. For body text, contact details, and legal copy: `Arial, Helvetica, sans-serif` without a web font
 6. Each project defines its web font in its own `CLAUDE.md`
 7. **Match the fallback to the web font's category, don't default to Arial.** Rules 2–5 assume a *sans-serif* brand font. If a project's display font is a **serif** (e.g. Playfair Display, a common brand choice), the fallback chain must be serif too — `Georgia, 'Times New Roman', serif`. Georgia ships on both Windows and macOS; `'Times New Roman'` is the universal serif backstop. **Never** fall back a serif brand font to Arial — Outlook (which ignores the web font) would then render a serif design in a sans-serif face, silently off-brand. Monospace brand fonts follow the same logic: `'Courier New', monospace`.
@@ -93,24 +93,55 @@ font-family: Helvetica, Arial, sans-serif;
 ## Folder Structure
 
 ```
-agent-email-development/        ← the agent (portable, independent)
-├── CLAUDE.md                   ← this file (agent identity + tech stack)
-├── OUTLOOK_RULES.md            ← the 4 portable rule files
+agent-email-development/          ← the agent (portable, independent)
+├── CLAUDE.md                     ← this file (agent identity + tech stack)
+├── OUTLOOK_RULES.md              ← the 4 portable rule files
 ├── DARK_MODE_RULES.md
 ├── RESPONSIVE_RULES.md
 ├── FIGMA_TO_EMAIL_WORKFLOW.md
-├── PRE_SEND_QA.md              ← consolidated pre-send QA checklist
-└── projects/                   ← hosted working copies (projects may also live elsewhere)
-    └── b2b-partnerships-email/  ← example: a "With Variables" project
-        ├── CLAUDE.md            ← project brief
-        ├── template.mjml        ← project template
-        ├── generate.js          ← With Variables only
-        ├── package.json         ← pins MJML exactly
-        ├── credentials.json     ← gitignored (Google service-account key)
-        └── output/              ← generated HTML(s)
+├── PRE_SEND_QA.md                ← consolidated pre-send QA checklist
+├── PORTABILITY_REVIEW.md         ← dated record of the 2026-07-10 review — history, not knowledge
+├── validate-email.js             ← shared pre-send gate (the email-qa subagent wraps it)
+├── postprocess-email.js          ← the post-compile step MJML cannot do (class on <body>)
+├── docs-contract.test.js         ← the agent's prose vs the code enforcing it (node docs-contract.test.js)
+├── package.json                  ← makes the agent a declarable dependency; `npm test` runs the doc gate
+├── audit/                        ← audit ledgers + fix records (history; does not travel as knowledge)
+├── .claude/
+│   └── agents/                   ← portable subagent (travels with the folder)
+│       └── email-qa.md           ← technical/rendering pre-send QA gate
+└── projects/                     ← hosted working copies (projects may also live elsewhere)
+    └── b2b-partnerships-email/   ← example: a "With Variables" project
+        ├── CLAUDE.md             ← project brief
+        ├── template.mjml         ← project template
+        ├── generate.js           ← With Variables only — reads the data source, renders per row
+        ├── build-email.js        ← deterministic sample build → dist/email.html
+        ├── check-agent-dep.js    ← pretest guard: the agent dependency really resolves
+        ├── qa-tokens.txt         ← this project's placeholder contract (--tokens)
+        ├── tests/                ← jest suite (npm test)
+        ├── package.json          ← pins MJML exactly; declares the agent as a dependency
+        ├── package-lock.json     ← the resolved dependency tree, committed
+        ├── .claude/launch.json   ← dist-preview (4173) + output-preview (4174)
+        ├── .gitignore
+        ├── credentials.json      ← gitignored (Google service-account key)
+        ├── output/               ← the real run — the HTML(s) that get sent (gitignored)
+        │   └── diagnostic/       ←   --profile isolation builds, never sent
+        └── dist/                 ← the deterministic sample build (gitignored)
 ```
 
-The agent lives in its own folder. Projects can live anywhere — inside `projects/` (as the example above does), in another workspace, or on another machine. The agent does not depend on any specific project. Its knowledge is the four rule files plus `PRE_SEND_QA.md` (the consolidated pre-send checklist); there are no other rule/analysis files (the old `analisis_mjml_outlook_dark.md` advisor notes were archived — its insights folded into `DARK_MODE_RULES.md`).
+**The public distribution is a subset of this, on purpose.** The agent is published at `oegit/agent-email-development` for anyone to download, and that copy ships the six knowledge files, `validate-email.js`, `postprocess-email.js` and the `email-qa` subagent — the things a person needs to build an email. It **omits** four kinds of thing, each for a stated reason:
+
+| Omitted from the public copy | Why |
+|---|---|
+| `projects/b2b-partnerships-email/` | A real client project: a live Google Sheet ID, one client's brief and template. `projects/` ships empty; the agent scaffolds yours from your own brief. |
+| `audit/` | Audit ledgers quote the code as it was, including a named employee's direct phone and corporate e-mail. Internal record, never published. |
+| `PORTABILITY_REVIEW.md` | A dated internal review naming a host workspace and the people in it. |
+| `docs-contract.test.js`, `package.json` | Maintainer tooling for editing the agent, not for using it. |
+
+So in the published copy the example-project half of the map above is illustration, not inventory — the map is still true of the folder you are reading it in.
+
+**`docs-contract.test.js` holds this map to the folder** — every file that ships must appear here, and every path named here must exist. The map used to omit `PORTABILITY_REVIEW.md`, `build-email.js`, `qa-tokens.txt`, `tests/`, `dist/` and `.claude/launch.json` while asserting three lines below that "there are no other rule/analysis files" (audit 2026-07-26, R35).
+
+The agent lives in its own folder. Projects can live anywhere — inside `projects/` (as the example above does), in another workspace, or on another machine. The agent does not depend on any specific project. Its **knowledge** is the four rule files plus `PRE_SEND_QA.md` — those five are what a reader must read, and there are no other *rule* files (the old `analisis_mjml_outlook_dark.md` advisor notes were archived; their insights are folded into `DARK_MODE_RULES.md`). The folder also ships things that are **not** knowledge and must not be read as rules: `PORTABILITY_REVIEW.md` and `audit/` are dated records, and `validate-email.js` / `postprocess-email.js` / `docs-contract.test.js` are executables. That distinction is the point — the map above used to omit the non-knowledge files entirely and then claim nothing else existed.
 
 ---
 
@@ -131,8 +162,19 @@ To use it on a different account or machine:
 3. Claude reads this `CLAUDE.md` automatically on startup
 4. Point to the project: *"The project is at [path]. Read its CLAUDE.md and tell me when you're ready."*
 
+**The `email-qa` subagent travels with the folder.** It lives in this folder's own `.claude/agents/`, so a plain folder copy carries it alongside `validate-email.js` and the rule files — nothing to re-add by hand.
+
+**But it only resolves if the session's working directory is inside this folder.** Claude Code scans `.claude/agents/` from the working directory **upward**; it does not descend into subfolders. So:
+
+- Open Claude Code **at `agent-email-development/`** (the way § Portability step 2 says to) → `email-qa` resolves. This is the supported way to use the agent.
+- Open it at an enclosing monorepo root → `email-qa` is **not** available. The root's own `.claude/agents/` are, and this folder's are not.
+
+That second line used to read as though it resolved either way. **Observed directly on 2026-07-26**, from a session whose working directory was an enclosing repo's root: the only subagent available was that repo's own root-level one — `email-qa` was not, and neither were the subagents nested in sibling project folders. Upward-only is the behaviour; "closest to the cwd" was describing a tie-break that never comes up from above (audit 2026-07-26, R30).
+
+(Gotcha: if you *create* a `.claude/agents/` directory for the first time during a live session, restart Claude Code once — the file-watcher only tracks directories that existed at startup.)
+
 Does not depend on Claude account memory or any Anthropic configuration.
 
 ---
 
-*Last updated: 2026-07-10 · v4 · portability scrub (removed Lab references in Font Rules serif note + Lessons Convention); Font Rule 7 (serif/monospace fallback chains).*
+*Last updated: 2026-07-26 · v6 · Audit fixes (`audit/RECONCILE_AGENT_EMAIL_DEVELOPMENT_20260726.md`, see `audit/FIXES_20260726.md` for what changed and what it opened). Font Rule 4 rewritten — `<link>`, never `@import` — and backed by the new `docs-contract.test.js`, which executes the prose instead of restating it (R25). The subagent-resolution claim in § Portability corrected to what was actually observed: the scan goes upward only, so this folder must be the session's working directory (R30). Host-workspace names dereferenced out of the files that travel (R31). Folder map completed and now asserted mechanically (R35). New agent-root files: `package.json` (the agent is a real declared dependency now — R11), `postprocess-email.js` (the post-compile step MJML cannot do, which is what made check 9(a) passable for a Standard project — R26), `docs-contract.test.js`. v5 · moved the `email-qa` subagent into this folder's own `.claude/agents/` so it travels with a folder copy; added `.claude/agents/` + `validate-email.js` to the folder map. v4 · portability scrub; Font Rule 7 (serif/monospace fallback chains).*
