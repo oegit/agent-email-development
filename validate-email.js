@@ -46,6 +46,15 @@
 
 const fs   = require('fs');
 const path = require('path');
+// Check 9(a) asks whether `<body>` carries the class that `postprocess-email.js`
+// puts there. That is ONE question, so it gets ONE implementation, owned by the
+// script that writes it — the same move TOKEN_RE made for checks 2 and 11 (J9).
+// Before this, each file carried its own `\bclass\s*=` and both were wrong in the
+// same way: `\b` matches between `-` and `c`, so `data-class="…"` satisfied both,
+// the post-processor merged into the decoy and the gate blessed the result
+// (audit 2026-07-27 R3, K1). Both scripts travel together — see CLAUDE.md's
+// distribution table — so this require resolves anywhere the gate does.
+const { hasBodyClass } = require('./postprocess-email');
 
 // [MANUAL] / not-applicable-to-MJML — printed in the report, never blocking.
 const MANUAL_ITEMS = [
@@ -196,8 +205,12 @@ function validate(html, mjml = null, contract = null) {
   //       <body class="body"> quoted inside a comment satisfied this test, so an email
   //       that really ships blend divs and really lacks the class passed with 0 failures.
   //       J12 fails a correct build loudly; this passed a broken one silently.
-  const hasBodyClass = /<body\b[^>]*\bclass\s*=\s*["'][^"']*\bbody\b/.test(clean);
-  if (usesBlend && !hasBodyClass) {
+  //       It now reads `hasBodyClass` from postprocess-email.js — the script that WRITES
+  //       the class — instead of re-deriving the pattern here. The local copy read
+  //       `\bclass\s*=`, which matches inside `data-class=`, so the gate confirmed a class
+  //       that was never added while the post-processor reported adding it (K1, 20260727 R3).
+  const bodyClassPresent = hasBodyClass(clean);
+  if (usesBlend && !bodyClassPresent) {
     fail('missing <body class="body"> — Gmail "u + .body" blend selector will not fire. '
        + 'MJML cannot emit it; run the agent\'s postprocess-email.js on the compiled HTML');
   } else if (!usesBlend) {
@@ -228,8 +241,42 @@ function validate(html, mjml = null, contract = null) {
             + `near-white (>= ${NEAR_WHITE_MIN} on every channel), so no blend divs are required`);
   }
 
-  // 10. VML namespaces declared (Outlook rounded buttons / rects).
-  if (!/xmlns:v\s*=/.test(html)) fail('missing VML xmlns:v namespace on <html> — Outlook VML will not render');
+  // 10. VML namespace declared ON THE <html> TAG (Outlook rounded buttons / rects).
+  // OUTLOOK_RULES.md Rule 12: "For any VML to work (buttons, workarounds), the <html>
+  // tag must declare the namespaces."
+  //
+  // This check had two defects, opposite in direction, both closed here (L1, 20260727 R3):
+  //   (a) it tested the RAW `html` for the bare string `xmlns:v=` and never looked at the
+  //       <html> tag at all — so ANY occurrence satisfied it, including the `xmlns:v=` that
+  //       OUTLOOK_RULES.md's own Rule 5 button snippet puts on the <v:roundrect> INSIDE an
+  //       `<!--[if mso]>` conditional. An email built exactly to the agent's documented
+  //       snippet, with a bare <html>, passed the one check that exists for it. Same class
+  //       as J12 and as the check 9(a) mirror above: reading raw html where a comment can
+  //       answer the question.
+  //   (b) it was UNCONDITIONAL, so an email shipping no VML at all — the common Standard
+  //       project — was failed for a namespace it has no use for. That is exactly the shape
+  //       R26 had to undo on check 9(a), and it is why this now reports itself skipped.
+  //
+  // Finding the VML takes BOTH strings, and neither alone is right. Every VML element
+  // this agent documents lives inside an `<!--[if mso]>` conditional, which stripComments
+  // removes — so `clean` alone sees none of it. But the raw `html` cannot tell a real
+  // conditional from an ordinary comment that merely TALKS about VML, and reading it
+  // whole is what let a comment answer for the document in the first place. So: VML
+  // outside comments, plus VML inside the conditionals Outlook actually parses.
+  //
+  // The declaration is read from `clean`, so a commented-out example of the <html> tag
+  // cannot answer for the real one — and the leading `\s` anchors the attribute name, so
+  // a hyphenated one cannot either (K1's defect, deliberately not repeated here).
+  const msoBlocks = (html.match(/<!--\[if[^\]]*\]>[\s\S]*?<!\[endif\]-->/gi) || []).join('');
+  const usesVml = /<v:[a-z]/i.test(clean) || /<v:[a-z]/i.test(msoBlocks);
+  const vmlNsOnHtml = /<html\b[^>]*\sxmlns:v\s*=/i.test(clean);
+  if (usesVml && !vmlNsOnHtml) {
+    fail('VML element present but no xmlns:v namespace on the <html> tag — Outlook VML will not render '
+       + '(OUTLOOK_RULES.md Rule 12; a declaration inside an <!--[if mso]> conditional is not the <html> tag)');
+  } else if (!usesVml) {
+    info.push('VML namespace check 10 skipped: this email ships no <v:…> element, so it needs no '
+            + 'xmlns:v declaration on <html>');
+  }
 
   // 11. Placeholder contract on the MJML source: exactly the declared tokens.
   if (mjml != null) {
