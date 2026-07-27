@@ -4,7 +4,7 @@ Outlook for Windows uses the **Microsoft Word rendering engine** — not WebKit 
 
 ---
 
-## RULE 1 — Fonts: Arial before Helvetica
+## RULE 1 — Fonts: match the fallback to the brand font's category (Arial before Helvetica for sans-serif)
 
 **Problem:** Outlook on Windows does not have Helvetica installed by default. Without it, it falls back to Times New Roman (serif).
 
@@ -13,11 +13,19 @@ Outlook for Windows uses the **Microsoft Word rendering engine** — not WebKit 
 /* ❌ Wrong */
 font-family: Helvetica, Arial, sans-serif;
 
-/* ✅ Correct */
+/* ✅ Correct — sans-serif brand font */
 font-family: 'Your Web Font', Arial, Helvetica, sans-serif;
+
+/* ✅ Correct — serif brand font (e.g. Playfair Display) */
+font-family: 'Your Serif Web Font', Georgia, 'Times New Roman', serif;
+
+/* ✅ Correct — monospace brand font */
+font-family: 'Your Mono Web Font', 'Courier New', monospace;
 ```
 
 **Why:** Arial is present on every Windows system. Helvetica is primarily a macOS font.
+
+**The Arial-before-Helvetica ordering is scoped to sans-serif brand fonts, and the scope matters.** Outlook ignores the web font entirely (Rule 2), so the fallback chain *is* what ships there. Fall a **serif** brand font back to Arial and Outlook renders a serif design in a sans-serif face — no error anywhere, just silently off-brand. Georgia ships on both Windows and macOS and `'Times New Roman'` is the universal serif backstop, which is why the serif chain reads `Georgia, 'Times New Roman', serif`; monospace follows the same logic with `'Courier New', monospace`. This carve-out was stated in `CLAUDE.md` Font Rule 7 and never reached this file — the one the pre-send checklist tells you to consult (audit 2026-07-26 R2, J7/J8).
 
 ---
 
@@ -167,7 +175,7 @@ Older square-table workaround (borderless circular photos only):
 
 **Problem:** Outlook inherits the `background-color` of `<body>` (typically `#F5F5F5`) on any `<td>` that does not have an explicit background. This creates gray strips between blocks that should be white.
 
-**Fix:** Every block `<td>` has its own inline `background-color`, without exception.
+**Fix:** Every block `<td>` has its own inline `background-color` — with exactly one exception, inside a `<v:textbox>` (see *The one exception* below).
 
 ```html
 <!-- ❌ Wrong — inherits #F5F5F5 from body -->
@@ -180,6 +188,10 @@ Older square-table workaround (borderless circular photos only):
 **This applies inside nested raw-HTML tables too, not just top-level blocks.** Confirmed via Litmus on Outlook 2016–365 (Windows): a contact card with a colored background (`#FAFAFA`) containing its own mini-tables (icon + text rows) and spacer `<td>` rows showed visible gray stripes at every spacer row and wrapper `<td>` that didn't carry the card's own background-color explicitly. A spacer row like `<td style="height:12px; font-size:0; line-height:0;">&nbsp;</td>` needs `background-color:#FAFAFA` (or whatever the card's bg is) added too — height/font-size/line-height alone aren't enough.
 
 **Goes one level deeper than just the wrapper.** A mini-table's own *inner* cells (e.g. the icon `<td>` and the text `<td>` inside an icon+text row) also need their own explicit `background-color`, even when their immediate parent `<td>` already has it. Don't assume a nested table's cells transparently show the ancestor's color through in Word's renderer — give every `<td>` in the stack its own explicit background, not just the outermost one.
+
+**The one exception — inside a `<v:textbox>`, a CSS `background-color` is forbidden.** When a block is wrapped in the td-scoped VML rect of `DARK_MODE_RULES.md` (Outlook Windows Desktop), nothing inside the `<v:textbox>` may carry a CSS `background-color`: Outlook dark inverts that color and paints it *on top of* the VML fill. Litmus-confirmed — this is exactly how a hero block whose inner `<td>` had a `background-color` showed a wrong blue while the intro block, without one, held (`DARK_MODE_RULES.md` → Experiment Log, 2026-07-01). If an inner element still needs a background anchor for Gmail, use `background-image:linear-gradient(C,C)` instead — Word ignores gradients, so a gradient cannot cover the fill.
+
+This rule and that one are not in tension once you know which is which: **outside** a `<v:textbox>`, a missing `background-color` gives you gray strips; **inside** one, a present `background-color` gives you the wrong color. Stated without the carve-out, this rule sent a reader straight into the confirmed regression (audit 2026-07-26 R2, J6).
 
 ---
 
@@ -373,10 +385,10 @@ Outlook's Word renderer — and several older/webmail clients — mishandle CSS 
 
 ## Pre-send Checklist
 
-- [ ] Every font stack has Arial before Helvetica?
+- [ ] Every **sans-serif** font stack has Arial before Helvetica — and a serif/monospace brand font has a matching chain instead (`Georgia, 'Times New Roman', serif` · `'Courier New', monospace`), never Arial (Rule 1)?
 - [ ] No box-model shorthand — padding/margin per side; `line-height` unitless on flowing text, except explicit px matching the cell height on spacers (Rules 9/10/17); font-weight numeric (Rule 18)?
 - [ ] Every `<img>` has an `alt` attribute (empty for decorative) (Rule 18)?
-- [ ] Every block `<td>` has an inline `background-color`?
+- [ ] Every block `<td>` has an inline `background-color` — **except** inside a `<v:textbox>`, where it must have none (Rule 7)?
 - [ ] Buttons have VML + HTML fallback?
 - [ ] Images have `width` and `height` as HTML attributes?
 - [ ] Vertical spacing uses spacer `<td>` rows, not margins?
@@ -390,4 +402,4 @@ Outlook's Word renderer — and several older/webmail clients — mishandle CSS 
 
 ---
 
-*Last updated: 2026-07-25 · v4 · Rule 2 rewritten: web fonts load via `<link rel="stylesheet">` (non-MSO conditional), never `@import` (ESP-rejected, blocked by validate-email.js check 13) nor MJML's `<mj-font>` (emits a redundant `@import` Mailchimp rejects). The "why" was written back from the `b2b-partnerships-email` template's `<link>`-only fix (2026-07-07) so the next project doesn't reintroduce it — plus an explicit pending-Litmus caveat (last render round predates the swap). v3 · Rule 18 (CSS hygiene: no box-model shorthand, unitless line-height, numeric font-weight, img alt) absorbed from oe-email-dev.*
+*Last updated: 2026-07-26 · v5 · Round-2 audit fixes (`audit/RECONCILE_AGENT_EMAIL_DEVELOPMENT_20260726_R2.md`). **Rule 1 re-framed as "match the fallback to the brand font's category"**: the Arial-before-Helvetica ordering is scoped to sans-serif brand fonts and the serif/monospace chains are given as ✅ examples, because `CLAUDE.md` Font Rule 7 had carved that out and the carve-out never reached this file — the one the pre-send checklist tells the reader to consult, so following the documented pointer confirmed the wrong answer (J7/J8). **Rule 7 gains its one exception**: no CSS `background-color` inside a `<v:textbox>`, the Litmus-confirmed regression `DARK_MODE_RULES.md` records; stated flat, this rule sent a reader straight into it (J6). Both pre-send checklist rows scoped to match. `docs-contract.test.js` §4 now holds all three carve-outs — line-height, block-`<td>` background, font fallback — as one table instead of a bespoke block per rule. Footer bumped as part of J14. v4 · Rule 2 rewritten: web fonts load via `<link rel="stylesheet">` (non-MSO conditional), never `@import` (ESP-rejected, blocked by validate-email.js check 13) nor MJML's `<mj-font>` (emits a redundant `@import` Mailchimp rejects). The "why" was written back from the `b2b-partnerships-email` template's `<link>`-only fix (2026-07-07) so the next project doesn't reintroduce it — plus an explicit pending-Litmus caveat (last render round predates the swap). v3 · Rule 18 (CSS hygiene: no box-model shorthand, unitless line-height, numeric font-weight, img alt) absorbed from oe-email-dev.*

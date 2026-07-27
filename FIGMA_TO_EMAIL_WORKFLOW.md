@@ -119,7 +119,9 @@ npx mjml template.mjml -o output/[email-name].html
 **Then run the post-process — MJML cannot do this part itself:**
 
 ```bash
-# Adds class="body" to <body> (merging with any existing class, idempotent).
+# From the project folder. Adds class="body" to <body> (merging with any
+# existing class, idempotent). `../../` is the standard `projects/<name>/`
+# layout — count the directories between your project and the agent folder.
 node ../../postprocess-email.js output/[email-name].html
 ```
 
@@ -166,13 +168,25 @@ Verify specifically:
 
 ## STEP 9 — Fix and document
 
-Apply fixes from Litmus results. If a new issue is discovered that is not yet documented, add it to `OUTLOOK_RULES.md` or `DARK_MODE_RULES.md` with:
+Apply fixes from Litmus results. If a new issue is discovered that is not yet documented, write it into the agent's knowledge with:
 - The exact problem
 - The client where it appears
 - The fix applied
 - Why it works
 
-This keeps the agent's knowledge current with every project.
+**Where it goes: the file holding the rule the lesson refines.** That is the routing rule; the destinations are all five knowledge files, not two:
+
+| The lesson is about… | It goes in |
+|---|---|
+| An Outlook / Word-engine rendering rule | `OUTLOOK_RULES.md` |
+| A dark-mode recipe or a client's dark behaviour | `DARK_MODE_RULES.md` |
+| Mobile, stacking, media queries, tap targets | `RESPONSIVE_RULES.md` |
+| The build process itself — Figma, MJML, compilation, the gate | `FIGMA_TO_EMAIL_WORKFLOW.md` (this file) |
+| A check that should be run before every send | `PRE_SEND_QA.md`, as a row with its label |
+
+If a lesson refines a rule that lives in two files, it goes in both — that is what `docs-contract.test.js` is for. This step was written naming only the first two, which left a responsive or workflow lesson with no documented destination even though the practice already routed them correctly — `RESPONSIVE_RULES.md` Rule 8 came from the portability-review test build (audit 2026-07-26 R2, J13).
+
+This keeps the agent's knowledge current with every project — `CLAUDE.md` § Lessons Convention makes this step the single mechanism by which the agent learns, so a lesson with nowhere to go is a lesson lost.
 
 ---
 
@@ -180,24 +194,30 @@ This keeps the agent's knowledge current with every project.
 
 Before the email goes to a real send, run the full **`PRE_SEND_QA.md`** checklist — the single consolidated pre-send gate. It covers structure, styles, fonts, images, CTAs, and points to `OUTLOOK_RULES.md` / `DARK_MODE_RULES.md` / `RESPONSIVE_RULES.md` for the deep client-specific checks, plus the sign-off block.
 
-The mechanical half is automated by **`validate-email.js`** (zero dependencies, plain Node):
+The mechanical half is automated by **`validate-email.js`** (zero dependencies, plain Node).
+
+**Run it from the PROJECT folder, pointing at the agent root.** The two halves live in different places and only one directory sees both: `output/`, `template.mjml` and `qa-tokens.txt` are the project's, while `validate-email.js` is the agent's. From the agent root the script resolves and its inputs do not exist; from the project folder the inputs exist and the script does not resolve. The path below is `../../` for the standard `projects/<name>/` layout — **it depends on how many directories separate your project from `agent-email-development/`**, and a project can live anywhere (see § Prerequisites), so count them.
 
 ```bash
+# cd into the project folder first — all three commands assume you are there.
+
 # Standard project — against the compiled HTML:
-node validate-email.js output/[email-name].html
+node ../../validate-email.js output/[email-name].html
 
 # With Variables — enforce the placeholder contract too, over the REAL run:
-node validate-email.js output/*.html --mjml template.mjml --tokens qa-tokens.txt
+node ../../validate-email.js output/*.html --mjml template.mjml --tokens qa-tokens.txt
 
 # ...and over the deterministic sample build, if the project has one:
-node validate-email.js dist/email.html --mjml template.mjml --tokens qa-tokens.txt
+node ../../validate-email.js dist/email.html --mjml template.mjml --tokens qa-tokens.txt
 ```
 
-**Gate `output/`, not only `dist/`.** `output/` is the real run — the files that get sent. `dist/` is the deterministic sample (`build-email.js`, one fixed anonymized row) that the test suite and CI use; it shares no data with `output/`, so a green `dist/` says nothing about the emails going out. Running the gate with no file argument defaults to `dist/email.html`. On "With Variables" projects `generate.js` runs the gate per row as it writes, so the real run cannot leave ungated.
+A project that declares the agent as a dependency (`"agent-email-development": "file:../.."` in its `package.json`) gets the path for free — the agent exposes `validate-email` and `postprocess-email` as bins, so `npx validate-email output/*.html` works from that project regardless of nesting, and the project can wrap it in its own `npm run validate`.
+
+**Gate `output/`, not only `dist/`.** `output/` is the real run — the files that get sent. `dist/` is the deterministic sample build a project may define (one fixed anonymized row); it shares no data with `output/`, so a green `dist/` says nothing about the emails going out. Running the gate with no file argument defaults to `dist/email.html`. On "With Variables" projects `generate.js` runs the gate per row as it writes, so the real run cannot leave ungated.
 
 It exits non-zero on any blocking failure and writes `VALIDATION_REPORT.md`. On "With Variables" projects `generate.js` also auto-verifies a subset at build time (unresolved placeholders, Gmail blend contract, leaf-`<td>` backgrounds). Everything the script lists as `[MANUAL]` — Litmus renders, legal footer, minimum sizes, final copy — stays human.
 
-**The gate runs in Claude Code, pointed at the agent folder.** A green run anywhere else is a pre-check, not the send gate.
+**The send gate is the agent's script run against the project's output, in Claude Code.** Every path above is relative to the project folder; only the script itself is relative to the agent. A green run that gated something else — a stale `dist/`, another project's output — is a pre-check, not the send gate.
 
 ---
 
@@ -221,4 +241,4 @@ Pick the model by the nature of the step (resilient wording — model availabili
 
 ---
 
-*Last updated: 2026-07-25 · v6 · STEP 5 now specifies loading Google Fonts via `<link rel="stylesheet">` in an `<mj-raw>` non-MSO conditional — not `@import`, not `<mj-font>` (see OUTLOOK_RULES Rule 2). STEP 10 (in the same round as the validate-email.js gate docs, PR #82) points the mechanical half at `validate-email.js`. v5 · model/effort guidance reworded to be self-contained (removed workspace-root routing reference) for portability.*
+*Last updated: 2026-07-26 · v7 · Round-2 audit fixes (`audit/RECONCILE_AGENT_EMAIL_DEVELOPMENT_20260726_R2.md`). **STEP 10's three commands rewritten**: they ran from no directory at all — from the agent root the script resolved and `output/`/`template.mjml`/`qa-tokens.txt` did not exist; from the project folder the inputs existed and the script did not resolve. They now run from the project folder pointing at the agent root, with `../../` given as the standard-layout case and stated as depending on nesting, plus the `npx validate-email` bin form a project that declares the dependency gets for free (verified by installing it). STEP 6 carries the same caveat, and the closing line names which directory each path is relative to (J3). **STEP 9 opened from 2 destinations to 5**, with the routing rule stated — `CLAUDE.md` makes this step the single mechanism by which the agent learns, so a responsive or workflow lesson having nowhere documented to go meant it was lost (J13). Footer bumped as part of J14. v6 · STEP 5 now specifies loading Google Fonts via `<link rel="stylesheet">` in an `<mj-raw>` non-MSO conditional — not `@import`, not `<mj-font>` (see OUTLOOK_RULES Rule 2). STEP 10 (in the same round as the validate-email.js gate docs, PR #82) points the mechanical half at `validate-email.js`. v5 · model/effort guidance reworded to be self-contained (removed workspace-root routing reference) for portability.*

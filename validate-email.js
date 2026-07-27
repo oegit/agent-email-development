@@ -72,6 +72,25 @@ function stripComments(html) {
 }
 
 /**
+ * What a placeholder token looks like. ONE definition, used by check 2 (unresolved
+ * tokens in the compiled output) and check 11 (the MJML placeholder contract), so the
+ * two cannot disagree about what a token is.
+ *
+ * They did disagree, in the direction that ships (audit 2026-07-26 R2, J9). Check 2
+ * was `[A-Za-z_]+` — NO DIGITS — while PRE_SEND_QA.md promises, as an [AUTO] row, that
+ * it "blocks on any surviving {{…}}". `{{CLIENT_NAME}}` matched; `{{BLOCK_2_BG}}` and
+ * `{{IMAGE_2_URL}}` did not, so a numbered token shipped to recipients with a green
+ * gate and the checklist row ticked. Check 11 was narrower still (`[A-Z_]+`): it missed
+ * digits AND lowercase, so a lowercase token was outside the --tokens contract in both
+ * directions — never reported unknown, never reported missing — while
+ * FIGMA_TO_EMAIL_WORKFLOW.md teaches lowercase-with-digits field names.
+ *
+ * Global on purpose: both call sites use matchAll, which clones the regex internally,
+ * so there is no shared-lastIndex hazard.
+ */
+const TOKEN_RE = /\{\{([A-Za-z0-9_]+)\}\}/g;
+
+/**
  * A CSS color value → [r,g,b], or null if this function does not understand it.
  *
  * Exists because check 9(b) used to recognise exactly three hex spellings of white
@@ -120,8 +139,8 @@ function validate(html, mjml = null, contract = null) {
   const bytes = Buffer.byteLength(html, 'utf8');
   if (bytes >= 102 * 1024) fail(`size ${bytes} bytes ≥ 102KB — Gmail will clip the email`);
 
-  // 2. No unresolved placeholder tokens.
-  const unresolved = [...new Set((html.match(/\{\{[A-Za-z_]+\}\}/g) || []))];
+  // 2. No unresolved placeholder tokens. Shared TOKEN_RE — see its comment for why.
+  const unresolved = [...new Set([...html.matchAll(TOKEN_RE)].map(m => m[0]))];
   if (unresolved.length) fail(`unresolved tokens in output: ${unresolved.join(', ')}`);
 
   // 3. No Google Drive share/preview URLs (must be CDN or uc?export= form).
@@ -165,8 +184,19 @@ function validate(html, mjml = null, contract = null) {
   //       no blend divs and must NOT be failed for their absence. So gate (b)
   //       on the presence of white text (#FFFFFF / #FFF / #FFFFFE) in a real
   //       `color:` property (not `background-color:`); if there is none, skip.
-  const usesBlend = /u\s*\+\s*\.body/.test(clean) || /gmail-blend-screen/.test(html);
-  const hasBodyClass = /<body\b[^>]*\bclass\s*=\s*["'][^"']*\bbody\b/.test(html);
+  //       Both halves read `clean`, not `html`. The second used to read the raw HTML,
+  //       so a CSS comment mentioning the technique — e.g. one describing the removed
+  //       [data-ogsb] layer, the exact scenario this module's own stripComments note
+  //       gives as its reason — turned this check ON and failed a correct build for a
+  //       <body class="body"> it does not need (audit 2026-07-26 R2, J12).
+  const usesBlend = /u\s*\+\s*\.body/.test(clean) || /gmail-blend-screen/.test(clean);
+  //       `hasBodyClass` reads `clean` for the same reason, found while fixing J12 and
+  //       recorded separately in FIXES_20260726_R2.md because the J12 row names only the
+  //       two lines above. It is the MIRROR of J12 and the worse direction: on raw html a
+  //       <body class="body"> quoted inside a comment satisfied this test, so an email
+  //       that really ships blend divs and really lacks the class passed with 0 failures.
+  //       J12 fails a correct build loudly; this passed a broken one silently.
+  const hasBodyClass = /<body\b[^>]*\bclass\s*=\s*["'][^"']*\bbody\b/.test(clean);
   if (usesBlend && !hasBodyClass) {
     fail('missing <body class="body"> — Gmail "u + .body" blend selector will not fire. '
        + 'MJML cannot emit it; run the agent\'s postprocess-email.js on the compiled HTML');
@@ -179,7 +209,7 @@ function validate(html, mjml = null, contract = null) {
   // by the leading [^-a-z]) whose value resolves to near-white, in ANY notation.
   const colorValues = [...clean.matchAll(/(?:^|[^-a-z])color\s*:\s*([^;"'}<]+)/gi)].map(m => m[1]);
   const whiteText = [...new Set(colorValues.filter(isNearWhite).map(v => v.trim()))];
-  const blendDivsPresent = /<div[^>]*class="[^"]*\bgmail-blend-screen\b/.test(html);
+  const blendDivsPresent = /<div[^>]*class="[^"]*\bgmail-blend-screen\b/.test(clean);
   // The template DECLARING the technique (a `.gmail-blend-screen` CSS rule) while
   // the markup carries no such div is the inverted form of the same defect: the
   // divs are built conditionally, so a condition that silently stopped matching
@@ -203,7 +233,7 @@ function validate(html, mjml = null, contract = null) {
 
   // 11. Placeholder contract on the MJML source: exactly the declared tokens.
   if (mjml != null) {
-    const used = new Set((mjml.match(/\{\{([A-Z_]+)\}\}/g) || []).map(t => t.replace(/[{}]/g, '')));
+    const used = new Set([...mjml.matchAll(TOKEN_RE)].map(m => m[1]));
     if (contract && contract.length) {
       const unknown = [...used].filter(t => !contract.includes(t));
       const missing = contract.filter(t => !used.has(t));
@@ -354,4 +384,4 @@ if (require.main === module) {
   console.log(`✅ validate-email: all blocking checks passed on ${results.length} file(s).${writeReport ? ` See ${reportPath}` : ''}`);
 }
 
-module.exports = { validate, buildReport, MANUAL_ITEMS, stripComments, parseCssColor, isNearWhite, NEAR_WHITE_MIN };
+module.exports = { validate, buildReport, MANUAL_ITEMS, stripComments, parseCssColor, isNearWhite, NEAR_WHITE_MIN, TOKEN_RE };

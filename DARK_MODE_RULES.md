@@ -34,7 +34,7 @@ Emails always display in light mode. This is an intentional decision: brand colo
 
 **Accepted residue:** the CTA background gets rewritten by Outlook.com's inline `!important` (e.g. orange → dark red) — irrecoverable, but the label stays legible. Same category as the other accepted limitations.
 
-> If a future project is ever tempted to use these hooks, run profile-isolation builds first — see `b2b-partnerships-email/generate.js --profile`.
+> If a future project is ever tempted to use these hooks, **run profile-isolation builds first**: compile the same email once per dark-mode layer — a no-hacks baseline, then one build per layer added — and compare them side by side in Litmus. Isolating the variable is what turned "the hooks look fine" into the disproof below; a single build with everything on cannot tell you which layer broke the render. A "With Variables" project can wire this as a flag on its own generator (a `--profile` switch selecting which layers to emit); a Standard project does it by compiling the variants by hand.
 
 ### Outlook Windows Desktop (Word engine)
 
@@ -185,4 +185,4 @@ Chronological record of every dark-mode experiment on this agent's projects. Not
 
 ---
 
-*Last updated: 2026-07-05 · v2 · restructured — body = per-client current truth, full history moved to Experiment Log, checklist rewritten to match reality.*
+*Last updated: 2026-07-26 · v3 · Round-2 audit fixes (`audit/RECONCILE_AGENT_EMAIL_DEVELOPMENT_20260726_R2.md`). The Outlook.com body's profile-isolation advice no longer points at one instance project's `--profile` flag — it states the **technique** (one build per dark-mode layer, compared in Litmus) and how each project type wires it, because the path it named cannot resolve in any published copy, which ships `projects/` empty (J5). The Experiment Log keeps every instance mention as provenance, deliberately: it is the Litmus paper trail, and `docs-contract.test.js` now enforces that boundary rather than trusting it (J16). Nothing in the per-client recipes changed. This file's `v:textbox` caveat is unchanged but is now the OWNER of a carve-out three other surfaces are required to restate (J6). Footer bumped as part of J14: it had said 2026-07-05 through 21 days of edits, and these footers are the agent's only per-file version signal. v2 · restructured — body = per-client current truth, full history moved to Experiment Log, checklist rewritten to match reality.*
